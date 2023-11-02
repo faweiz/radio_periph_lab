@@ -119,16 +119,122 @@ architecture arch_imp of full_radio_v1_0_S00_AXI is
 	signal byte_index	: integer;
 	signal aw_en	: std_logic;
 
-COMPONENT dds_compiler_0
-  PORT (
-    aclk : IN STD_LOGIC;
-    aresetn : IN STD_LOGIC;
-    s_axis_phase_tvalid : IN STD_LOGIC;
-    s_axis_phase_tdata : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-    m_axis_data_tvalid : OUT STD_LOGIC;
-    m_axis_data_tdata : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
-  );
+    -- Fake ADC DDS
+    signal dds_tvalid_out : std_logic;
+    signal dds_tdata_out : std_logic_vector(15 downto 0);
+    signal dds_adc_tdata_out : std_logic_vector(31 downto 0) := (others => '0');
+    signal dds_reset: std_logic;
+    
+    -- Digital Downconverter Tuner DDS
+    signal dds_tuner_dc_tvalid_out : std_logic;
+    signal dds_tuner_dc_tdata_out : std_logic_vector(31 downto 0);
+    
+    -- Complex Multiplier
+    signal cmpy_0_tvalid_out : std_logic;
+    signal cmpy_0_tdata_out : std_logic_vector(31 downto 0);
+    
+    -- FIR Filter 1
+    signal fir1_tvalid_out: std_logic;
+    signal fir1_data_out: std_logic_vector(23 downto 0);
+    
+    -- FIR Filter 2
+    signal fir2_tvalid_out : std_logic;
+    signal fir2_data_out : std_logic_vector(23 downto 0);
+    
+    -- FIR Filter 3
+    signal fir3_tvalid_out : std_logic;
+    signal fir3_data_out : std_logic_vector(23 downto 0);
+    
+    -- FIR Filter 4
+    signal fir4_tvalid_out : std_logic;
+    signal fir4_data_out : std_logic_vector(23 downto 0);
+    signal fir_data_out : std_logic_vector(31 downto 0); 
+    
+    COMPONENT dds_compiler_0
+       PORT (
+              aclk : IN STD_LOGIC;
+              aresetn : IN STD_LOGIC;
+              s_axis_phase_tvalid : IN STD_LOGIC;
+              s_axis_phase_tdata : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+              m_axis_data_tvalid : OUT STD_LOGIC;
+              m_axis_data_tdata : OUT STD_LOGIC_VECTOR(15 DOWNTO 0)
+       );
     END COMPONENT;
+    
+    component dds_compiler_1
+        port (aclk                 : in std_logic;
+              aresetn              : in std_logic;
+              s_axis_config_tvalid : in std_logic;
+              s_axis_config_tdata  : in std_logic_vector (31 downto 0);          
+              m_axis_data_tvalid   : out std_logic;                  
+              m_axis_data_tdata    : out std_logic_vector (31 downto 0));    
+    end component;
+    
+    component cmpy_0
+        port (
+            aclk : IN STD_LOGIC;
+            s_axis_a_tvalid : IN STD_LOGIC;
+            s_axis_a_tdata : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+            s_axis_b_tvalid : IN STD_LOGIC;
+            s_axis_b_tdata : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+            m_axis_dout_tvalid : OUT STD_LOGIC;
+            m_axis_dout_tdata : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
+    );
+    end component;
+    
+    component fir_compiler_1
+      port (
+        aclk : IN STD_LOGIC;
+        s_axis_data_tvalid : IN STD_LOGIC;
+        s_axis_data_tready : OUT STD_LOGIC;
+        s_axis_data_tdata : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+        m_axis_data_tvalid : OUT STD_LOGIC;
+        m_axis_data_tdata : OUT STD_LOGIC_VECTOR(23 DOWNTO 0)
+      );
+    end component;
+    
+     component fir_compiler_2
+      port (
+        aclk : IN STD_LOGIC;
+        s_axis_data_tvalid : IN STD_LOGIC;
+        s_axis_data_tready : OUT STD_LOGIC;
+        s_axis_data_tdata : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
+        m_axis_data_tvalid : OUT STD_LOGIC;
+        m_axis_data_tdata : OUT STD_LOGIC_VECTOR(23 DOWNTO 0)
+      );
+    end component;
+
+    component fir_compiler_3
+      port (
+        aclk : IN STD_LOGIC;
+        s_axis_data_tvalid : IN STD_LOGIC;
+        s_axis_data_tready : OUT STD_LOGIC;
+        s_axis_data_tdata : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+        m_axis_data_tvalid : OUT STD_LOGIC;
+        m_axis_data_tdata : OUT STD_LOGIC_VECTOR(23 DOWNTO 0)
+      );
+    end component;
+    
+    component fir_compiler_4
+      port (
+        aclk : IN STD_LOGIC;
+        s_axis_data_tvalid : IN STD_LOGIC;
+        s_axis_data_tready : OUT STD_LOGIC;
+        s_axis_data_tdata : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
+        m_axis_data_tvalid : OUT STD_LOGIC;
+        m_axis_data_tdata : OUT STD_LOGIC_VECTOR(23 DOWNTO 0)
+      );
+    end component;
+    
+    signal counter	:std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
+    signal enable_counter : std_logic;
+    component clkdivider is
+        generic (divideby : natural := 2);
+        port (  clk : in std_logic;
+             resetn : in std_logic;
+             pulseout : out std_logic);
+    end component;
+    
 
 begin
 	-- I/O Connections assignments
@@ -367,11 +473,11 @@ begin
 	      when b"00" =>
 	        reg_data_out <= slv_reg0;
 	      when b"01" =>
-	        reg_data_out <= x"DEADBEEF";
+	        reg_data_out <= slv_reg1;
 	      when b"10" =>
 	        reg_data_out <= slv_reg2;
 	      when b"11" =>
-	        reg_data_out <= slv_reg3;
+	        reg_data_out <= counter; --slv_reg3;
 	      when others =>
 	        reg_data_out  <= (others => '0');
 	    end case;
@@ -397,18 +503,104 @@ begin
 
 
 	-- Add user logic here
+    -- Fake ADC DDS
+    dds_reset <= not slv_reg2(0);           -- Control Register (BASE+0x08): When bit 0 of this register is ¡®1¡¯, the DDS will be in reset.
+    
+    dds_test : dds_compiler_0
+      PORT MAP (
+        aclk => s_axi_aclk,
+        aresetn => dds_reset,                 -- Control Register (BASE+0x08): When bit 0 of this register is ¡®1¡¯, the DDS will be in reset.
+        s_axis_phase_tvalid => '1',
+        s_axis_phase_tdata => slv_reg0,         -- Fake_ADC_PINC_Register (BASE+0x00): Read/Writes the phase increment of the fake-adc DDS
+        m_axis_data_tvalid => dds_tvalid_out,
+        m_axis_data_tdata => dds_tdata_out
+      );
+        
+    -- Digital Downconverter Tuner DDS             
+    dds_tuner_dc : dds_compiler_1
+        port map (aclk                => s_axi_aclk,
+                  aresetn             => dds_reset,                 -- Control Register (BASE+0x08): When bit 0 of this register is ¡®1¡¯, the DDS will be in reset.
+                  s_axis_config_tvalid => '1',
+                  s_axis_config_tdata  => slv_reg1,                   -- Tuner_PINC_Register (BASE+0x04): Read/Writes the phase increment of the fake-adc DDS
+                  m_axis_data_tvalid  => dds_tuner_dc_tvalid_out,
+                  m_axis_data_tdata   => dds_tuner_dc_tdata_out);
+         
+    dds_adc_tdata_out(15 downto 0) <=  dds_tdata_out;         
+    
+    -- Complex Multiplier              
+    complex_multiplier: cmpy_0
+        port map(aclk                => s_axi_aclk,
+                 s_axis_a_tvalid     => dds_tvalid_out,
+                 s_axis_a_tdata      => dds_adc_tdata_out, -- dds_tdata_out,
+                 s_axis_b_tvalid     => dds_tuner_dc_tvalid_out,
+                 s_axis_b_tdata      => dds_tuner_dc_tdata_out,
+                 m_axis_dout_tvalid  => cmpy_0_tvalid_out,
+                 m_axis_dout_tdata   => cmpy_0_tdata_out);
 
-your_instance_name : dds_compiler_0
-  PORT MAP (
-    aclk => s_axi_aclk,
-    aresetn => '1',
-    s_axis_phase_tvalid => '1',
-    s_axis_phase_tdata => slv_reg0,
-    m_axis_data_tvalid => m_axis_tvalid,
-    m_axis_data_tdata => m_axis_tdata
-  );
+    -- real part = cosine (I) Right (15 downto 0),
+    FIR_filter_1: fir_compiler_1
+      port map (
+        aclk => s_axi_aclk,
+        s_axis_data_tvalid => cmpy_0_tvalid_out, --dds_tvalid_out
+        s_axis_data_tdata => cmpy_0_tdata_out(15 downto 0), --dds_tdata_out
+        m_axis_data_tvalid => fir1_tvalid_out,
+        m_axis_data_tdata => fir1_data_out
+      );
+      
+    FIR_filter_2: fir_compiler_2
+      port map (
+        aclk => s_axi_aclk,
+        s_axis_data_tvalid => fir1_tvalid_out,
+        s_axis_data_tdata => fir1_data_out,
+        m_axis_data_tvalid => fir2_tvalid_out,
+        m_axis_data_tdata => fir2_data_out
+      );
+      
+    -- imaginary part = sine (Q) Left (31 downto 16)
+    FIR_filter_3: fir_compiler_3
+      port map (
+        aclk => s_axi_aclk,
+        s_axis_data_tvalid => cmpy_0_tvalid_out,
+        s_axis_data_tdata => cmpy_0_tdata_out(31 downto 16),
+        m_axis_data_tvalid => fir3_tvalid_out,
+        m_axis_data_tdata => fir3_data_out
+      );
+      
+    FIR_filter_4: fir_compiler_4
+      port map (
+        aclk => s_axi_aclk,
+        s_axis_data_tvalid => fir3_tvalid_out,
+        s_axis_data_tdata => fir3_data_out,
+        m_axis_data_tvalid => fir4_tvalid_out,
+        m_axis_data_tdata => fir4_data_out
+      );
+      
+    fir_data_out(15 downto 0) <= fir2_data_out(15 downto 0);
+    fir_data_out(31 downto 16) <= fir4_data_out(15 downto 0);
 
-
+    m_axis_tvalid <= fir2_tvalid_out or fir4_tvalid_out;
+    m_axis_tdata <= fir_data_out;
+    
+    -- Creating a new pulse counter
+    makeCounter: clkdivider generic map (divideby => 2)
+        port map (
+            clk => s_axi_aclk, 
+            resetn=> S_AXI_ARESETN, 
+            pulseout => enable_counter
+        );
+        
+    -- counter clock for Timer Register (slv_reg3)
+    process(s_axi_aclk,S_AXI_ARESETN)
+    begin
+        if S_AXI_ARESETN='0' then
+            counter <= (others=>'0');
+        elsif rising_edge(s_axi_aclk) then
+            if enable_counter ='1' then
+                counter <= std_logic_vector( unsigned(counter) + 1 );
+            end if;
+        end if;
+    end process;
+    
 	-- User logic ends
 
 end arch_imp;
